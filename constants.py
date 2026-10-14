@@ -15,3 +15,10 @@ BUSINESS_DAY_STARTS_HOUR = 6
 def business_date(moment):
     """The business day a datetime belongs to."""
     return (moment - timedelta(hours=BUSINESS_DAY_STARTS_HOUR)).date()
+
+# Employee closing codes
+CODE_MIN_LENGTH = 4
+CODE_MAX_LENGTH = 8
+GENERATED_CODE_LENGTH = 6    # length of auto-generated codes
+CODE_ATTEMPT_LIMIT = 5       # wrong codes in a row before a device is locked
+CODE_LOCKOUT_MINUTES = 5

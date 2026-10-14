@@ -3,6 +3,7 @@ from models import db, Bar, Category, Role, Employee, ClosingTask
 
 app = Flask(__name__)
 app.config["SECRET_KEY"] = "dev-secret-change-later"
+app.config["CODE_PEPPER"] = "dev-pepper-change-later"
 app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///inventory.db"
 db.init_app(app)
 
@@ -36,14 +37,6 @@ with app.app_context():
         admin.set_pin("1234")
         admin.must_change_pin = True
         db.session.add(admin)
-        db.session.commit()
-
-    if Employee.query.filter_by(role_id=Role.query.filter_by(name="employee").first().id).count() == 0:
-        emp_role_id = Role.query.filter_by(name="employee").first().id
-        db.session.add_all([
-            Employee(name="Armstrong", bar_id=bar.id, role_id=emp_role_id),
-            Employee(name="Jordan", bar_id=bar.id, role_id=emp_role_id),
-        ])
         db.session.commit()
     
     if ClosingTask.query.count() == 0:

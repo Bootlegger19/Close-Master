@@ -27,6 +27,8 @@ class Employee(db.Model):
     failed_attempts = db.Column(db.Integer, default=0, nullable=False)
     locked_until = db.Column(db.DateTime)
     must_change_pin = db.Column(db.Boolean, default=False, nullable=False)
+    code_hash = db.Column(db.String(64), unique=True)  # keyed hash of the closing code; None = no code
+    archived_at = db.Column(db.DateTime)               # set when removed; closings keep pointing at them
 
     role = db.relationship("Role")
 
@@ -45,12 +47,14 @@ class Category(db.Model):
     bar_id = db.Column(db.Integer, db.ForeignKey("bar.id"), nullable=False)
 
     items = db.relationship("Item", backref="category", lazy=True)
+    archived_at = db.Column(db.DateTime)   
 
 
 class Item(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False)
     category_id = db.Column(db.Integer, db.ForeignKey("category.id"), nullable=False)
+    archived_at = db.Column(db.DateTime)
 
 
 class InventorySession(db.Model):
@@ -80,6 +84,7 @@ class ClosingTask(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     bar_id = db.Column(db.Integer, db.ForeignKey("bar.id"), nullable=False)
     description = db.Column(db.String(200), nullable=False)
+    archived_at = db.Column(db.DateTime)
 
 
 class CashCount(db.Model):
@@ -103,6 +108,7 @@ class TaskCompletion(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     session_id = db.Column(db.Integer, db.ForeignKey("inventory_session.id"), nullable=False)
     task_id = db.Column(db.Integer, db.ForeignKey("closing_task.id"), nullable=False)
+    done = db.Column(db.Boolean, nullable=False, default=True)  
 
 
 class ClosingNote(db.Model):

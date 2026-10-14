@@ -7,6 +7,8 @@ from flask import (Blueprint, flash, g, jsonify, redirect, render_template,
 
 from constants import DENOMINATIONS
 from printout import pdf_response
+from security import (clear_failed_codes, find_employee_by_code,
+                      lockout_minutes_left, register_failed_code)
 from models import (db, CashCount, CashCountLine, Category, ClosingNote,
                     ClosingTask, Count, Employee, InventorySession, Item,
                     TaskCompletion)
@@ -59,22 +61,35 @@ def home():
 
 @employee_bp.route("/start-closing", methods=["GET", "POST"])
 def start_closing():
+    if request.method == "GET":
+        if get_current_session():
+            return redirect(url_for("employee.closing_hub"))
+        return render_template("start_closing.html")
+
+    # POST: reply with JSON; static/pin-login.js shows errors or navigates.
     if get_current_session():
-        return redirect(url_for("employee.closing_hub"))
+        return jsonify(success=True, redirect=url_for("employee.closing_hub"))
 
-    if request.method == "POST":
-        employee_id = request.form.get("employee_id", type=int)
-        employee = db.session.get(Employee, employee_id) if employee_id else None
-        if not employee:
-            flash("Please select your name before starting.")
-            return redirect(url_for("employee.start_closing"))
-        new_session = InventorySession(bar_id=employee.bar_id, employee_id=employee.id)
-        db.session.add(new_session)
-        db.session.commit()
-        session["inventory_session_id"] = new_session.id
-        return redirect(url_for("employee.closing_hub"))
+    device = request.remote_addr
+    minutes = lockout_minutes_left(device)
+    if minutes:
+        return jsonify(success=False,
+                       error=f"Too many wrong codes. Try again in {minutes} minute(s)."), 429
 
-    return render_template("start_closing.html", employees=Employee.query.all())
+    employee = find_employee_by_code(request.form.get("code", "").strip())
+    if not employee:
+        if register_failed_code(device):
+            error = "Too many wrong codes. This device is locked for a few minutes."
+        else:
+            error = "Code not recognised. Check it and try again."
+        return jsonify(success=False, error=error), 401
+
+    clear_failed_codes(device)
+    new_session = InventorySession(bar_id=employee.bar_id, employee_id=employee.id)
+    db.session.add(new_session)
+    db.session.commit()
+    session["inventory_session_id"] = new_session.id
+    return jsonify(success=True, redirect=url_for("employee.closing_hub"))
 
 
 @employee_bp.route("/closing")

@@ -1,0 +1,83 @@
+{% extends "admin_base.html" %}
+{% block title %}Employees{% endblock %}
+{% block admin_content %}
+  <p class="text-muted">
+    Employees start a closing by entering their code. Codes are stored scrambled, so they can't be
+    looked up later: if someone forgets theirs, use <b>Reset code</b> to give them a new one.
+  </p>
+
+  <form action="{{ url_for('admin.add_employee') }}" method="post" class="row g-2 mb-4">
+    <div class="col-md-5">
+      <input type="text" name="name" maxlength="{{ name_max }}" class="form-control"
+             placeholder="Employee name" required>
+    </div>
+    <div class="col-md-4">
+      <input type="text" name="code" inputmode="numeric" autocomplete="off" maxlength="{{ code_max }}"
+             class="form-control" placeholder="Code (blank = generate)">
+    </div>
+    <div class="col-md-3">
+      <button type="submit" class="btn btn-primary w-100">Add employee</button>
+    </div>
+  </form>
+
+  <div class="card mb-4">
+    <ul class="list-group list-group-flush">
+      {% for employee in employees %}
+        <li class="list-group-item">
+          <div class="row g-2 align-items-center">
+            <div class="col-lg-4">
+              <form action="{{ url_for('admin.rename_employee', employee_id=employee.id) }}"
+                    method="post" class="d-flex gap-2">
+                <input type="text" name="name" value="{{ employee.name }}" maxlength="{{ name_max }}"
+                       class="form-control form-control-sm" aria-label="Employee name" required>
+                <button type="submit" class="btn btn-outline-primary btn-sm">Save</button>
+              </form>
+            </div>
+            <div class="col-lg-5">
+              <form action="{{ url_for('admin.reset_employee_code', employee_id=employee.id) }}"
+                    method="post" class="d-flex gap-2">
+                <input type="text" name="code" inputmode="numeric" autocomplete="off"
+                       maxlength="{{ code_max }}" class="form-control form-control-sm"
+                       placeholder="New code (blank = generate)" aria-label="New code">
+                <button type="submit" class="btn btn-outline-warning btn-sm text-nowrap">Reset code</button>
+              </form>
+            </div>
+            <div class="col-lg-3 text-lg-end">
+              <form action="{{ url_for('admin.archive_employee', employee_id=employee.id) }}"
+                    method="post"
+                    onsubmit="return confirm('Archive {{ employee.name }}? Their code stops working, but their past closings are kept.');">
+                <button type="submit" class="btn btn-outline-danger btn-sm">Archive</button>
+              </form>
+            </div>
+          </div>
+          {% if not employee.code_hash %}
+            <span class="badge text-bg-danger mt-2">No code set</span>
+          {% endif %}
+        </li>
+      {% else %}
+        <li class="list-group-item text-muted">No employees yet. Add one above.</li>
+      {% endfor %}
+    </ul>
+  </div>
+
+  {% if archived %}
+    <h2 class="h5">Archived</h2>
+    <p class="text-muted small">
+      Archived employees can't start closings, but their past closings are kept.
+      Restoring someone gives them a new code.
+    </p>
+    <ul class="list-group mb-4">
+      {% for employee in archived %}
+        <li class="list-group-item d-flex justify-content-between align-items-center">
+          <span>
+            {{ employee.name }}
+            <span class="text-muted small">archived {{ employee.archived_at.strftime('%b %d, %Y') }}</span>
+          </span>
+          <form action="{{ url_for('admin.restore_employee', employee_id=employee.id) }}" method="post">
+            <button type="submit" class="btn btn-outline-success btn-sm">Restore</button>
+          </form>
+        </li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+{% endblock %}

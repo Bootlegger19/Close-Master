@@ -1,14 +1,15 @@
 {% extends "base.html" %}
 {% block title %}Start Closing{% endblock %}
 {% block content %}
-  <h1 class="mb-4">Who's closing tonight?</h1>
-  <form method="post">
-    <select name="employee_id" class="form-select mb-3" required>
-      <option value="" disabled selected>Select your name</option>
-      {% for employee in employees %}
-        <option value="{{ employee.id }}">{{ employee.name }}</option>
-      {% endfor %}
-    </select>
-    <button type="submit" class="btn btn-primary">Start inventory check</button>
-  </form>
+  <div class="mx-auto my-5" style="max-width: 400px;">
+    <h1 class="mb-3">Start closing</h1>
+    <p class="text-muted">Enter your employee code.</p>
+    <form method="post" action="{{ url_for('employee.start_closing') }}" data-pin-form data-mode="replace">
+      <div data-error class="alert alert-danger d-none"></div>
+      <input type="password" name="code" inputmode="numeric" autocomplete="off"
+             class="form-control form-control-lg mb-3" placeholder="Employee code" required autofocus>
+      <button type="submit" class="btn btn-success w-100">Start inventory check</button>
+    </form>
+  </div>
+  <script src="{{ url_for('static', filename='pin-login.js') }}"></script>
 {% endblock %}
