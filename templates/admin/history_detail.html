@@ -1,7 +1,14 @@
 {% extends "admin_base.html" %}
 {% block title %}Closing details{% endblock %}
 {% block admin_content %}
-  <a href="{{ url_for('admin.history') }}" class="btn btn-outline-secondary btn-sm mb-3">← All closings</a>
+  <div class="d-flex flex-wrap gap-2 mb-3">
+    <a href="{{ url_for('admin.history') }}" class="btn btn-outline-secondary btn-sm">← All closings</a>
+    <a href="{{ url_for('admin.closing_pdf', session_id=closing.id) }}" target="_blank"
+       class="btn btn-primary btn-sm">View PDF</a>
+    <a href="{{ url_for('admin.closing_pdf', session_id=closing.id, download=1) }}"
+       class="btn btn-outline-primary btn-sm">Download PDF</a>
+  </div>
+  
   <h2 class="h4">{{ closing.completed_at.strftime('%A, %b %d %Y') }}</h2>
   <p class="text-muted">
     Closed by {{ closing.employee.name }}

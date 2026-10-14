@@ -1,10 +1,11 @@
-from datetime import datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from functools import wraps
 
 from flask import (Blueprint, flash, jsonify, redirect, render_template, request,
                    session, url_for)
 
-from constants import DENOMINATIONS
+from constants import BUSINESS_DAY_STARTS_HOUR, DENOMINATIONS, business_date
+from printout import pdf_response
 from models import (db, Bar, CashCount, Category, ClosingTask, Employee,
                     InventorySession, Item, TaskCompletion)
 
@@ -23,6 +24,7 @@ ADMIN_TABS = [
     ("stock", "Stock", "admin.stock"),
     ("tasks", "Closing tasks", "admin.tasks"),
     ("history", "History", "admin.history"),
+    ("printouts", "Printouts", "admin.printouts"),
     ("security", "Security", "admin.change_pin"),
 ]
 HISTORY_LIMIT = 50   # most recent closings shown on the History tab
@@ -234,6 +236,40 @@ def history_detail(session_id):
                            closing=closing, categories=categories, counts=counts,
                            cash=cash, cash_lines=cash_lines,
                            tasks=tasks_list, done_ids=done_ids)
+
+
+@admin_bp.route("/printouts")
+@pin_required
+def printouts():
+    bar = Bar.query.first()
+    default_day = business_date(datetime.now())
+    try:
+        day = date.fromisoformat(request.args.get("date", default_day.isoformat()))
+    except ValueError:
+        flash("That date isn't valid. Showing today instead.")
+        day = default_day
+
+    # One business day: from the cutoff hour until the same hour the next morning.
+    start = datetime.combine(day, time(BUSINESS_DAY_STARTS_HOUR))
+    closings = (InventorySession.query
+                .filter_by(bar_id=bar.id, status="completed")
+                .filter(InventorySession.completed_at >= start,
+                        InventorySession.completed_at < start + timedelta(days=1))
+                .order_by(InventorySession.completed_at.desc())
+                .all())
+    return render_template("printouts.html", active_tab="printouts", day=day,
+                           closings=closings,
+                           prev_day=day - timedelta(days=1),
+                           next_day=day + timedelta(days=1),
+                           day_start_hour=BUSINESS_DAY_STARTS_HOUR)
+
+
+@admin_bp.route("/history/<int:session_id>/pdf")
+@pin_required
+def closing_pdf(session_id):
+    closing = InventorySession.query.filter_by(
+        id=session_id, status="completed").first_or_404()
+    return pdf_response(closing, as_attachment=request.args.get("download") == "1")
 
 
 # ------------------------------------------------------------ stock actions

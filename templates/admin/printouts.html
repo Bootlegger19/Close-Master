@@ -1,0 +1,39 @@
+{% extends "admin_base.html" %}
+{% block title %}Printouts{% endblock %}
+{% block admin_content %}
+  <form method="get" class="d-flex flex-wrap gap-2 align-items-center mb-2">
+    <a href="{{ url_for('admin.printouts', date=prev_day.isoformat()) }}"
+       class="btn btn-outline-secondary btn-sm">← Previous day</a>
+    <input type="date" name="date" value="{{ day.isoformat() }}" class="form-control"
+           style="width: 180px;">
+    <button type="submit" class="btn btn-primary btn-sm">Show</button>
+    <a href="{{ url_for('admin.printouts', date=next_day.isoformat()) }}"
+       class="btn btn-outline-secondary btn-sm">Next day →</a>
+  </form>
+  <p class="text-muted small">
+    A day runs from {{ '%02d:00'|format(day_start_hour) }} to {{ '%02d:00'|format(day_start_hour) }}
+    the next morning, so a late-night closing counts toward the evening it started.
+  </p>
+
+  <h2 class="h5 mt-3 mb-3">{{ day.strftime('%A, %B %d, %Y') }}</h2>
+  <div class="list-group">
+    {% for closing in closings %}
+      <div class="list-group-item d-flex justify-content-between align-items-center">
+        <div>
+          <div class="fw-bold">Submitted {{ closing.completed_at.strftime('%H:%M') }} · {{ closing.employee.name }}</div>
+          <div class="text-muted small">
+            {{ closing.counts|length }} items counted · {{ closing.notes|length }} note(s)
+          </div>
+        </div>
+        <div class="d-flex gap-2">
+          <a href="{{ url_for('admin.closing_pdf', session_id=closing.id) }}" target="_blank"
+             class="btn btn-outline-primary btn-sm">View PDF</a>
+          <a href="{{ url_for('admin.closing_pdf', session_id=closing.id, download=1) }}"
+             class="btn btn-primary btn-sm">Download</a>
+        </div>
+      </div>
+    {% else %}
+      <div class="list-group-item text-muted">No closings were submitted on this day.</div>
+    {% endfor %}
+  </div>
+{% endblock %}

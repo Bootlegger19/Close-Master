@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Closing submitted{% endblock %}
+{% block content %}
+  <div class="text-center my-5">
+    <h1 class="mb-2">Closing submitted</h1>
+    <p class="text-muted mb-4">
+      {{ closing.employee.name }} · {{ closing.completed_at.strftime('%A, %b %d %Y at %H:%M') }}
+    </p>
+    <a href="{{ url_for('employee.closing_pdf', session_id=closing.id) }}" target="_blank"
+       class="btn btn-primary me-2">View PDF</a>
+    <a href="{{ url_for('employee.closing_pdf', session_id=closing.id, download=1) }}"
+       class="btn btn-outline-primary">Download PDF</a>
+    <div class="mt-4">
+      <a href="{{ url_for('employee.home') }}" class="btn btn-outline-secondary">Back to employee home</a>
+    </div>
+  </div>
+{% endblock %}

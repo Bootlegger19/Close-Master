@@ -6,6 +6,7 @@ from flask import (Blueprint, flash, g, jsonify, redirect, render_template,
                    request, session, url_for)
 
 from constants import DENOMINATIONS
+from printout import pdf_response
 from models import (db, CashCount, CashCountLine, Category, ClosingNote,
                     ClosingTask, Count, Employee, InventorySession, Item,
                     TaskCompletion)
@@ -280,5 +281,26 @@ def finish_closing():
     current.completed_at = datetime.now()
     db.session.commit()
     session.pop("inventory_session_id", None)
+    session["last_closing_id"] = current.id   # lets this browser fetch its own printout
     flash("Closing submitted. Good night!")
-    return redirect(url_for("employee.home"))
+    return redirect(url_for("employee.closing_complete"))
+
+
+@employee_bp.route("/closing-complete")
+def closing_complete():
+    closing_id = session.get("last_closing_id")
+    closing = db.session.get(InventorySession, closing_id) if closing_id else None
+    if not closing or closing.status != "completed":
+        return redirect(url_for("employee.home"))
+    return render_template("closing_complete.html", closing=closing)
+
+
+@employee_bp.route("/printout/<int:session_id>")
+def closing_pdf(session_id):
+    # An employee can only fetch the closing they just submitted in this browser.
+    if session.get("last_closing_id") != session_id:
+        flash("That printout isn't available here. Ask an admin for it.")
+        return redirect(url_for("employee.home"))
+    closing = InventorySession.query.filter_by(
+        id=session_id, status="completed").first_or_404()
+    return pdf_response(closing, as_attachment=request.args.get("download") == "1")

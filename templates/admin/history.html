@@ -24,6 +24,8 @@
             <td class="text-end">
               <a href="{{ url_for('admin.history_detail', session_id=closing.id) }}"
                  class="btn btn-outline-primary btn-sm">View</a>
+              <a href="{{ url_for('admin.closing_pdf', session_id=closing.id) }}" target="_blank"
+                 class="btn btn-outline-secondary btn-sm">PDF</a>
             </td>
           </tr>
         {% else %}
