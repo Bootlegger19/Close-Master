@@ -5,10 +5,15 @@
     .count-input::-webkit-outer-spin-button,
     .count-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
     .count-input { -moz-appearance: textfield; appearance: textfield; }
+    .count-input.prefilled { color: #6c757d; font-style: italic; }
   </style>
+
   <h1 class="mb-2">Inventory Check</h1>
-  <p class="text-muted">Fill in what you counted, then press Done. Blank boxes are skipped.</p>
-  <div id="count-error" class="alert alert-danger d-none"></div>
+  <p class="text-muted">
+    Every box needs a number. Grey italic numbers are carried over from the last closing:
+    check each one and change anything that's different, then press Done.
+  </p>
+  <div id="count-error" class="alert alert-danger d-none sticky-top"></div>
 
   {% for category in categories %}
     <div class="card mb-3">
@@ -25,8 +30,9 @@
             <div class="input-group" style="width: 170px;">
               <button type="button" class="btn btn-outline-secondary step-btn"
                       data-item-id="{{ item.id }}" data-delta="-1">−</button>
-              <input type="number" min="0" step="1" class="form-control text-center count-input"
-                     data-item-id="{{ item.id }}" value="{{ current_counts.get(item.id, '') }}">
+              <input type="number" min="0" step="1" required
+                     class="form-control text-center count-input {% if item.id in last_counts and item.id not in saved_ids %}prefilled{% endif %}"
+                     data-item-id="{{ item.id }}" value="{{ prefill.get(item.id, '') }}">
               <button type="button" class="btn btn-outline-secondary step-btn"
                       data-item-id="{{ item.id }}" data-delta="1">+</button>
             </div>
@@ -49,32 +55,52 @@
     function showError(message) {
       errorBox.textContent = message;
       errorBox.classList.remove("d-none");
-      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+
+    function touch(input) {
+      input.classList.remove("prefilled", "is-invalid");
+      dirty = true;
     }
 
     document.querySelectorAll(".count-input").forEach(function (input) {
-      input.addEventListener("input", function () { dirty = true; });
+      input.addEventListener("input", function () { touch(input); });
     });
 
     document.querySelectorAll(".step-btn").forEach(function (button) {
       button.addEventListener("click", function () {
         const input = document.querySelector(`.count-input[data-item-id="${button.dataset.itemId}"]`);
         input.value = Math.max(0, (parseInt(input.value) || 0) + parseInt(button.dataset.delta));
-        dirty = true;
+        touch(input);
       });
     });
 
     document.getElementById("done-btn").addEventListener("click", function () {
+      errorBox.classList.add("d-none");
       const counts = [];
-      for (const input of document.querySelectorAll(".count-input")) {
-        if (input.value === "") continue;
-        const quantity = Number(input.value);
-        if (!Number.isInteger(quantity) || quantity < 0) {
-          input.focus();
-          showError("Counts must be whole numbers, zero or higher.");
+      const bad = [];
+
+      document.querySelectorAll(".count-input").forEach(function (input) {
+        input.classList.remove("is-invalid");
+        const raw = input.value.trim();
+        const quantity = Number(raw);
+        if (raw === "" || !Number.isInteger(quantity) || quantity < 0) {
+          input.classList.add("is-invalid");
+          bad.push(input);
           return;
         }
         counts.push({ item_id: Number(input.dataset.itemId), quantity: quantity });
+      });
+
+      if (bad.length > 0) {
+        bad[0].scrollIntoView({ behavior: "smooth", block: "center" });
+        showError(bad.length + " box(es) still empty or invalid. Every item needs a whole-number count.");
+        return;
+      }
+
+      const unchanged = document.querySelectorAll(".count-input.prefilled").length;
+      if (unchanged > 0 && !confirm(
+        unchanged + " item(s) are still at the last closing's number. Submit them as counted?")) {
+        return;
       }
 
       fetch(saveUrl, {

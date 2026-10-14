@@ -15,6 +15,7 @@ PIN_MIN_LENGTH = 4
 PIN_MAX_LENGTH = 8
 LOCKOUT_THRESHOLD = 5   # failed attempts before locking
 LOCKOUT_MINUTES = 5
+TASK_MAX_LENGTH = 200
 
 # --- Dashboard tabs: (key, label, endpoint). Adding a tab = adding one line. ---
 ADMIN_TABS = [
@@ -60,6 +61,16 @@ def register_failed_attempt(admin):
         session.pop("is_admin", None)
     db.session.commit()
     return locked
+
+
+def clean_task_description(raw):
+    """Return (text, error). Exactly one of them is None."""
+    text = (raw or "").strip()
+    if not text:
+        return None, "Task description can't be empty."
+    if len(text) > TASK_MAX_LENGTH:
+        return None, f"Task descriptions can be up to {TASK_MAX_LENGTH} characters."
+    return text, None
 
 
 def pin_required(view_func):
@@ -181,14 +192,6 @@ def stock():
     return render_template("stock.html", active_tab="stock", categories=categories)
 
 
-@admin_bp.route("/tasks")
-@pin_required
-def tasks():
-    bar = Bar.query.first()
-    return render_template("tasks.html", active_tab="tasks",
-                           tasks=ClosingTask.query.filter_by(bar_id=bar.id).all())
-
-
 @admin_bp.route("/history")
 @pin_required
 def history():
@@ -279,13 +282,37 @@ def delete_category(category_id):
 
 # ------------------------------------------------------------ task actions
 
+@admin_bp.route("/tasks")
+@pin_required
+def tasks():
+    bar = Bar.query.first()
+    return render_template("tasks.html", active_tab="tasks", max_len=TASK_MAX_LENGTH,
+                           tasks=ClosingTask.query.filter_by(bar_id=bar.id).all())
+
+
 @admin_bp.route("/add-task", methods=["POST"])
 @pin_required
 def add_task():
-    description = request.form["description"].strip()
-    if description:
-        db.session.add(ClosingTask(bar_id=Bar.query.first().id, description=description))
+    text, error = clean_task_description(request.form.get("description"))
+    if error:
+        flash(error)
+    else:
+        db.session.add(ClosingTask(bar_id=Bar.query.first().id, description=text))
         db.session.commit()
+    return redirect(url_for("admin.tasks"))
+
+
+@admin_bp.route("/edit-task/<int:task_id>", methods=["POST"])
+@pin_required
+def edit_task(task_id):
+    task = ClosingTask.query.get_or_404(task_id)
+    text, error = clean_task_description(request.form.get("description"))
+    if error:
+        flash(error)
+    else:
+        task.description = text
+        db.session.commit()
+        flash("Task updated.")
     return redirect(url_for("admin.tasks"))
 
 

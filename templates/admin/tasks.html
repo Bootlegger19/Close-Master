@@ -1,16 +1,23 @@
 {% extends "admin_base.html" %}
 {% block title %}Closing Tasks{% endblock %}
 {% block admin_content %}
-  <p class="text-muted">The checklist employees tick off during every closing.</p>
+  <p class="text-muted">The checklist employees tick off during every closing. Edit the text and press Save.</p>
   <div class="card mb-3">
     <ul class="list-group list-group-flush">
       {% for task in tasks %}
-        <li class="list-group-item d-flex justify-content-between align-items-center">
-          {{ task.description }}
-          <form action="{{ url_for('admin.delete_task', task_id=task.id) }}" method="post"
-                onsubmit="return confirm('Delete this task?');">
-            <button type="submit" class="btn btn-outline-danger btn-sm">Delete</button>
-          </form>
+        <li class="list-group-item">
+          <div class="d-flex gap-2">
+            <form action="{{ url_for('admin.edit_task', task_id=task.id) }}" method="post"
+                  class="d-flex gap-2 flex-grow-1">
+              <input type="text" name="description" value="{{ task.description }}"
+                     maxlength="{{ max_len }}" class="form-control" aria-label="Task description" required>
+              <button type="submit" class="btn btn-outline-primary btn-sm">Save</button>
+            </form>
+            <form action="{{ url_for('admin.delete_task', task_id=task.id) }}" method="post"
+                  onsubmit="return confirm('Delete this task?');">
+              <button type="submit" class="btn btn-outline-danger btn-sm">Delete</button>
+            </form>
+          </div>
         </li>
       {% else %}
         <li class="list-group-item text-muted">No tasks yet</li>
@@ -18,7 +25,8 @@
     </ul>
     <div class="card-body">
       <form action="{{ url_for('admin.add_task') }}" method="post" class="d-flex gap-2">
-        <input type="text" name="description" class="form-control" placeholder="New closing task" required>
+        <input type="text" name="description" maxlength="{{ max_len }}" class="form-control"
+               placeholder="New closing task" required>
         <button type="submit" class="btn btn-sm btn-outline-primary">Add</button>
       </form>
     </div>

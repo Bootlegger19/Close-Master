@@ -5,10 +5,10 @@ from functools import wraps
 from flask import (Blueprint, flash, g, jsonify, redirect, render_template,
                    request, session, url_for)
 
-from models import (db, CashCount, CashCountLine, Category, ClosingTask, Count,
-                    Employee, InventorySession, TaskCompletion, ClosingNote)
-
 from constants import DENOMINATIONS
+from models import (db, CashCount, CashCountLine, Category, ClosingNote,
+                    ClosingTask, Count, Employee, InventorySession, Item,
+                    TaskCompletion)
 
 employee_bp = Blueprint("employee", __name__, template_folder="../templates/employee")
 
@@ -44,6 +44,11 @@ def closing_required(view_func):
     return wrapper
 
 
+def get_bar_items(bar_id):
+    """Every item in a bar's categories: exactly what an inventory check must cover."""
+    return Item.query.join(Category).filter(Category.bar_id == bar_id).all()
+
+
 @employee_bp.route("/")
 def home():
     categories = Category.query.all()
@@ -75,10 +80,13 @@ def start_closing():
 @closing_required
 def closing_hub():
     current = g.current
+    item_ids = {item.id for item in get_bar_items(current.bar_id)}
+    counted_ids = {count.item_id for count in current.counts}
     return render_template(
         "closing_hub.html",
         current=current,
-        inventory_count=len(current.counts),
+        items_counted=len(counted_ids & item_ids),
+        items_total=len(item_ids),
         cash=CashCount.query.filter_by(session_id=current.id).first(),
         total_tasks=ClosingTask.query.filter_by(bar_id=current.bar_id).count(),
         done_tasks=TaskCompletion.query.filter_by(session_id=current.id).count(),
@@ -102,8 +110,14 @@ def inventory_check():
     last_counts = {c.item_id: c.quantity for c in previous.counts} if previous else {}
     current_counts = {c.item_id: c.quantity for c in current.counts}
 
-    return render_template("inventory_check.html", categories=categories,
-                           last_counts=last_counts, current_counts=current_counts)
+    return render_template(
+        "inventory_check.html",
+        categories=categories,
+        last_counts=last_counts,
+        # Boxes start at this closing's saved number, else last closing's number.
+        prefill={**last_counts, **current_counts},
+        saved_ids=set(current_counts),
+    )
 
 
 @employee_bp.route("/save-counts", methods=["POST"])
@@ -118,22 +132,26 @@ def save_counts():
     if not isinstance(entries, list):
         return jsonify(success=False, error="No counts were received."), 400
 
-    valid_item_ids = {item.id
-                      for category in Category.query.filter_by(bar_id=current.bar_id)
-                      for item in category.items}
+    item_ids = {item.id for item in get_bar_items(current.bar_id)}
 
     # Validate everything first, so one bad box never leaves a half-saved page.
     cleaned = {}
     for entry in entries:
         entry = entry if isinstance(entry, dict) else {}
         item_id, quantity = entry.get("item_id"), entry.get("quantity")
-        if not isinstance(item_id, int) or item_id not in valid_item_ids:
+        if not isinstance(item_id, int) or item_id not in item_ids:
             return jsonify(success=False,
                            error="An item no longer exists. Refresh the page and try again."), 400
         if not isinstance(quantity, int) or isinstance(quantity, bool) or quantity < 0:
             return jsonify(success=False,
                            error="Counts must be whole numbers, zero or higher."), 400
         cleaned[item_id] = quantity
+
+    missing = item_ids - set(cleaned)
+    if missing:
+        return jsonify(success=False,
+                       error=f"{len(missing)} item(s) still need a count. "
+                             "Refresh the page and fill in every box."), 400
 
     existing = {c.item_id: c for c in current.counts}
     for item_id, quantity in cleaned.items():
@@ -211,22 +229,6 @@ def closing_tasks():
     return render_template("closing_tasks.html", tasks=tasks, done_ids=done_ids)
 
 
-@employee_bp.route("/finish-closing", methods=["POST"])
-@closing_required
-def finish_closing():
-    current = g.current
-    if not current.counts:
-        flash("Enter at least one inventory count before finishing.")
-        return redirect(url_for("employee.closing_hub"))
-
-    current.status = "completed"
-    current.completed_at = datetime.now()
-    db.session.commit()
-    session.pop("inventory_session_id", None)
-    flash("Closing submitted. Good night!")
-    return redirect(url_for("employee.home"))
-
-
 @employee_bp.route("/notes", methods=["GET", "POST"])
 @closing_required
 def closing_notes():
@@ -256,3 +258,27 @@ def delete_note(note_id):
         db.session.delete(note)
         db.session.commit()
     return redirect(url_for("employee.closing_notes"))
+
+
+@employee_bp.route("/finish-closing", methods=["POST"])
+@closing_required
+def finish_closing():
+    current = g.current
+    items = get_bar_items(current.bar_id)
+    if not items:
+        flash("There are no items to count yet. Ask an admin to add stock items.")
+        return redirect(url_for("employee.closing_hub"))
+
+    counted_ids = {count.item_id for count in current.counts}
+    missing = [item.name for item in items if item.id not in counted_ids]
+    if missing:
+        shown = ", ".join(missing[:5]) + ("…" if len(missing) > 5 else "")
+        flash(f"Count every item before finishing. Still missing: {shown}")
+        return redirect(url_for("employee.inventory_check"))
+
+    current.status = "completed"
+    current.completed_at = datetime.now()
+    db.session.commit()
+    session.pop("inventory_session_id", None)
+    flash("Closing submitted. Good night!")
+    return redirect(url_for("employee.home"))
