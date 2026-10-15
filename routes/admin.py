@@ -12,6 +12,7 @@ from models import (db, Bar, CashCount, Category, ClosingTask, Employee,
 from printout import build_report, pdf_response
 from security import (code_in_use, generate_unique_code, hash_code,
                       validate_code_format)
+from trends import DEFAULT_SPAN_DAYS, GROUPS, MAX_PERIODS, METRICS, build_trend
 
 admin_bp = Blueprint("admin", __name__, template_folder="../templates/admin")
 
@@ -27,10 +28,12 @@ ITEM_NAME_MAX = 100
 TASK_MAX_LENGTH = 200
 EMPLOYEE_NAME_MAX = 100
 HISTORY_LIMIT = 50   # most recent closings shown on the History tab
+MAX_TREND_ITEMS = 8   # most items drawn on one chart
 
 # --- Dashboard tabs: (key, label, endpoint). Adding a tab = adding one line. ---
 ADMIN_TABS = [
     ("overview", "Overview", "admin.dashboard"),
+    ("trends", "Trends", "admin.trends"),
     ("stock", "Stock", "admin.stock"),
     ("tasks", "Closing tasks", "admin.tasks"),
     ("employees", "Employees", "admin.employees"),
@@ -297,6 +300,62 @@ def closing_pdf(session_id):
         id=session_id, status="completed").first_or_404()
     return pdf_response(closing, as_attachment=request.args.get("download") == "1")
 
+
+@admin_bp.route("/trends")
+@pin_required
+def trends():
+    bar = Bar.query.first()
+    categories = Category.query.filter_by(bar_id=bar.id).order_by(Category.id).all()
+    all_items = [item for category in categories for item in category.items]  # incl. archived
+    by_id = {item.id: item for item in all_items}
+
+    # Read the form (GET parameters), falling back to safe defaults for anything odd.
+    first_visit = "group" not in request.args
+    group = request.args.get("group", "week")
+    group = group if group in GROUPS else "week"
+    metric = request.args.get("metric", "level")
+    metric = metric if metric in METRICS else "level"
+    style = request.args.get("style", "bar")
+    style = style if style in ("bar", "line") else "bar"
+
+    try:
+        end = date.fromisoformat(request.args.get("to", ""))
+    except ValueError:
+        end = business_date(datetime.now())
+    try:
+        start = date.fromisoformat(request.args.get("from", ""))
+    except ValueError:
+        start = end - timedelta(days=DEFAULT_SPAN_DAYS[group])
+    if start > end:
+        flash("The 'from' date was after the 'to' date, so I swapped them.")
+        start, end = end, start
+
+    if first_visit:   # nothing chosen yet: start with the first few active items
+        selected_ids = [item.id for item in all_items if item.archived_at is None][:3]
+    else:
+        wanted = request.args.getlist("items", type=int)
+        selected_ids = [i for i in dict.fromkeys(wanted) if i in by_id]
+    if len(selected_ids) > MAX_TREND_ITEMS:
+        flash(f"Showing the first {MAX_TREND_ITEMS} selected items.")
+        selected_ids = selected_ids[:MAX_TREND_ITEMS]
+
+    trend = chart = None
+    if selected_ids:
+        trend = build_trend(bar.id, [by_id[i] for i in selected_ids],
+                            group, metric, start, end)
+        if trend["trimmed"]:
+            flash(f"That range has too many periods to draw, so only the most recent "
+                  f"{MAX_PERIODS} are shown.")
+        if trend["has_data"]:
+            chart = {"labels": trend["labels"], "datasets": trend["datasets"],
+                     "metric": metric, "style": style,
+                     "y_label": "Count" if metric == "level" else "Change in count"}
+
+    return render_template("trends.html", active_tab="trends", categories=categories,
+                           selected_ids=set(selected_ids), group=group, metric=metric,
+                           style=style, start=start, end=end, groups=GROUPS,
+                           metrics=METRICS, trend=trend, chart=chart,
+                           spans=DEFAULT_SPAN_DAYS, max_items=MAX_TREND_ITEMS)
 
 # ------------------------------------------------------- stock: categories / items
 
