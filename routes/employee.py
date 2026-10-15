@@ -10,8 +10,7 @@ from printout import pdf_response
 from security import (clear_failed_codes, find_employee_by_code,
                       lockout_minutes_left, register_failed_code)
 from models import (db, CashCount, CashCountLine, Category, ClosingNote,
-                    ClosingTask, Count, Employee, InventorySession, Item,
-                    TaskCompletion)
+                    ClosingTask, Count, InventorySession, Item, TaskCompletion)
 
 employee_bp = Blueprint("employee", __name__, template_folder="../templates/employee")
 
@@ -48,13 +47,22 @@ def closing_required(view_func):
 
 
 def get_bar_items(bar_id):
-    """Every item in a bar's categories: exactly what an inventory check must cover."""
-    return Item.query.join(Category).filter(Category.bar_id == bar_id).all()
+    """Every active item in a bar's active categories: what a closing must count."""
+    return (Item.query.join(Category)
+            .filter(Category.bar_id == bar_id,
+                    Category.archived_at.is_(None),
+                    Item.archived_at.is_(None))
+            .all())
+
+
+def get_bar_tasks(bar_id):
+    return (ClosingTask.query.filter_by(bar_id=bar_id)
+            .filter(ClosingTask.archived_at.is_(None)).all())
 
 
 @employee_bp.route("/")
 def home():
-    categories = Category.query.all()
+    categories = Category.query.filter(Category.archived_at.is_(None)).all()
     return render_template("items.html", categories=categories,
                            in_progress=get_current_session())
 
@@ -104,8 +112,8 @@ def closing_hub():
         items_counted=len(counted_ids & item_ids),
         items_total=len(item_ids),
         cash=CashCount.query.filter_by(session_id=current.id).first(),
-        total_tasks=ClosingTask.query.filter_by(bar_id=current.bar_id).count(),
-        done_tasks=TaskCompletion.query.filter_by(session_id=current.id).count(),
+        total_tasks=len(get_bar_tasks(current.bar_id)),
+        done_tasks=TaskCompletion.query.filter_by(session_id=current.id, done=True).count(),
         note_count=len(current.notes),
     )
 
@@ -114,7 +122,8 @@ def closing_hub():
 @closing_required
 def inventory_check():
     current = g.current
-    categories = Category.query.filter_by(bar_id=current.bar_id).all()
+    categories = (Category.query.filter_by(bar_id=current.bar_id)
+                  .filter(Category.archived_at.is_(None)).all())
 
     previous = (
         InventorySession.query
@@ -230,18 +239,19 @@ def cash_count():
 @closing_required
 def closing_tasks():
     current = g.current
-    tasks = ClosingTask.query.filter_by(bar_id=current.bar_id).all()
+    tasks = get_bar_tasks(current.bar_id)
 
     if request.method == "POST":
         checked_ids = {int(task_id) for task_id in request.form.getlist("task_ids")}
         TaskCompletion.query.filter_by(session_id=current.id).delete()
         for task in tasks:
             if task.id in checked_ids:
-                db.session.add(TaskCompletion(session_id=current.id, task_id=task.id))
+                db.session.add(TaskCompletion(session_id=current.id, task_id=task.id, done=True))
         db.session.commit()
         return redirect(url_for("employee.closing_hub"))
 
-    done_ids = {tc.task_id for tc in TaskCompletion.query.filter_by(session_id=current.id)}
+    done_ids = {tc.task_id for tc in
+                TaskCompletion.query.filter_by(session_id=current.id, done=True)}
     return render_template("closing_tasks.html", tasks=tasks, done_ids=done_ids)
 
 
@@ -291,6 +301,13 @@ def finish_closing():
         shown = ", ".join(missing[:5]) + ("…" if len(missing) > 5 else "")
         flash(f"Count every item before finishing. Still missing: {shown}")
         return redirect(url_for("employee.inventory_check"))
+
+    # Record the full checklist: tasks nobody ticked are saved as "not done", so this
+    # closing's report stays accurate even after the task list changes.
+    recorded = {tc.task_id for tc in TaskCompletion.query.filter_by(session_id=current.id)}
+    for task in get_bar_tasks(current.bar_id):
+        if task.id not in recorded:
+            db.session.add(TaskCompletion(session_id=current.id, task_id=task.id, done=False))
 
     current.status = "completed"
     current.completed_at = datetime.now()

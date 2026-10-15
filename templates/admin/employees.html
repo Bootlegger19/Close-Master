@@ -45,7 +45,7 @@
             <div class="col-lg-3 text-lg-end">
               <form action="{{ url_for('admin.archive_employee', employee_id=employee.id) }}"
                     method="post"
-                    onsubmit="return confirm('Archive {{ employee.name }}? Their code stops working, but their past closings are kept.');">
+                    data-confirm="Archive {{ employee.name }}? Their code stops working, but their past closings are kept.">
                 <button type="submit" class="btn btn-outline-danger btn-sm">Archive</button>
               </form>
             </div>

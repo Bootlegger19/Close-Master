@@ -8,47 +8,61 @@
     <a href="{{ url_for('admin.closing_pdf', session_id=closing.id, download=1) }}"
        class="btn btn-outline-primary btn-sm">Download PDF</a>
   </div>
-  
-  <h2 class="h4">{{ closing.completed_at.strftime('%A, %b %d %Y') }}</h2>
+
+  <h2 class="h4">{{ report.business_date.strftime('%A, %b %d %Y') }}</h2>
   <p class="text-muted">
-    Closed by {{ closing.employee.name }}
-    · started {{ closing.started_at.strftime('%H:%M') }},
-    submitted {{ closing.completed_at.strftime('%H:%M') }}
+    Closed by {{ report.employee }}
+    · started {{ report.started_at.strftime('%H:%M') }},
+    submitted {{ report.completed_at.strftime('%H:%M') }}
   </p>
 
   <h3 class="h5 mt-4">Inventory</h3>
-  {% for category in categories %}
+  {% for section in report.sections %}
     <div class="card mb-3">
-      <div class="card-header fw-bold">{{ category.name }}</div>
-      <ul class="list-group list-group-flush">
-        {% for item in category.items %}
-          <li class="list-group-item d-flex justify-content-between">
-            <span>{{ item.name }}</span>
-            <span class="fw-bold">{{ counts.get(item.id, '—') }}</span>
-          </li>
-        {% else %}
-          <li class="list-group-item text-muted">No items</li>
-        {% endfor %}
-      </ul>
+      <div class="card-header fw-bold">{{ section.category }}</div>
+      <div class="table-responsive">
+        <table class="table table-sm align-middle mb-0">
+          <thead>
+            <tr><th>Item</th><th class="text-end">Previous</th>
+                <th class="text-end">Count</th><th class="text-end">Change</th></tr>
+          </thead>
+          <tbody>
+            {% for row in section.rows %}
+              <tr>
+                <td>{{ row["name"] }}</td>
+                <td class="text-end text-muted">{{ row["previous"] if row["previous"] is not none else '–' }}</td>
+                <td class="text-end fw-bold">{{ row["count"] }}</td>
+                <td class="text-end">
+                  {% if row["change"] is none %}–
+                  {% elif row["change"] == 0 %}0
+                  {% else %}{{ '%+d'|format(row["change"]) }}{% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
     </div>
+  {% else %}
+    <p class="text-muted">No inventory counts were recorded.</p>
   {% endfor %}
 
   <h3 class="h5 mt-4">Cash</h3>
-  {% if cash %}
+  {% if report.cash %}
     <div class="card mb-3">
       <ul class="list-group list-group-flush">
-        {% for line in cash_lines %}
+        {% for line in report.cash.lines %}
           <li class="list-group-item d-flex justify-content-between">
             <span>{{ line.label }} × {{ line.quantity }}</span>
-            <span>${{ '%.2f'|format(line.subtotal) }}</span>
+            <span>${{ '%.2f'|format(line.subtotal_cents / 100) }}</span>
           </li>
         {% endfor %}
         <li class="list-group-item d-flex justify-content-between fw-bold">
-          <span>Subtotal</span><span>${{ '%.2f'|format(cash.total) }}</span>
+          <span>Subtotal</span><span>${{ '%.2f'|format(report.cash.total) }}</span>
         </li>
-        {% if cash.tip_pool_total is not none %}
+        {% if report.cash.tip_pool is not none %}
           <li class="list-group-item d-flex justify-content-between">
-            <span>Tip pool</span><span>${{ '%.2f'|format(cash.tip_pool_total) }}</span>
+            <span>Tip pool</span><span>${{ '%.2f'|format(report.cash.tip_pool) }}</span>
           </li>
         {% endif %}
       </ul>
@@ -60,21 +74,21 @@
   <h3 class="h5 mt-4">Closing tasks</h3>
   <div class="card mb-3">
     <ul class="list-group list-group-flush">
-      {% for task in tasks %}
+      {% for task in report.tasks %}
         <li class="list-group-item">
-          {{ '✔' if task.id in done_ids else '✘' }} {{ task.description }}
+          {{ '✔' if task.done else '✘' }} {{ task.description }}
         </li>
       {% else %}
-        <li class="list-group-item text-muted">No tasks defined</li>
+        <li class="list-group-item text-muted">No tasks were recorded</li>
       {% endfor %}
     </ul>
   </div>
 
   <h3 class="h5 mt-4">Notes</h3>
-  {% for note in closing.notes %}
+  {% for note in report.notes %}
     <div class="card mb-2">
       <div class="card-body py-2">
-        <div class="text-muted small">{{ note.created_at.strftime('%H:%M') }}</div>
+        <div class="text-muted small">{{ note.time.strftime('%H:%M') }}</div>
         <div style="white-space: pre-wrap;">{{ note.text }}</div>
       </div>
     </div>

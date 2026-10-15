@@ -1,7 +1,10 @@
 {% extends "admin_base.html" %}
 {% block title %}Closing Tasks{% endblock %}
 {% block admin_content %}
-  <p class="text-muted">The checklist employees tick off during every closing. Edit the text and press Save.</p>
+  <p class="text-muted">
+    The checklist employees tick off during every closing. Edit the text and press Save.
+    Archiving a task keeps it on past reports.
+  </p>
   <div class="card mb-3">
     <ul class="list-group list-group-flush">
       {% for task in tasks %}
@@ -13,9 +16,9 @@
                      maxlength="{{ max_len }}" class="form-control" aria-label="Task description" required>
               <button type="submit" class="btn btn-outline-primary btn-sm">Save</button>
             </form>
-            <form action="{{ url_for('admin.delete_task', task_id=task.id) }}" method="post"
-                  onsubmit="return confirm('Delete this task?');">
-              <button type="submit" class="btn btn-outline-danger btn-sm">Delete</button>
+            <form action="{{ url_for('admin.archive_task', task_id=task.id) }}" method="post"
+                  onsubmit="return confirm('Archive this task? It leaves future closings but stays on past reports.');">
+              <button type="submit" class="btn btn-outline-secondary btn-sm">Archive</button>
             </form>
           </div>
         </li>
@@ -31,4 +34,18 @@
       </form>
     </div>
   </div>
+
+  {% if archived_tasks %}
+    <h2 class="h5 mt-4">Archived</h2>
+    <ul class="list-group mb-3">
+      {% for task in archived_tasks %}
+        <li class="list-group-item d-flex justify-content-between align-items-center">
+          {{ task.description }}
+          <form action="{{ url_for('admin.restore_task', task_id=task.id) }}" method="post">
+            <button type="submit" class="btn btn-outline-success btn-sm">Restore</button>
+          </form>
+        </li>
+      {% endfor %}
+    </ul>
+  {% endif %}
 {% endblock %}

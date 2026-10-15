@@ -15,7 +15,7 @@ from reportlab.lib.units import inch
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 from constants import DENOMINATIONS, business_date
-from models import (db, Bar, CashCount, Category, ClosingTask, InventorySession,
+from models import (db, Bar, CashCount, ClosingTask, InventorySession,
                     TaskCompletion)
 
 _styles = getSampleStyleSheet()
@@ -36,9 +36,13 @@ NOTE = ParagraphStyle("Note", parent=_styles["BodyText"], leftIndent=8, spaceAft
 # ------------------------------------------------------------------ the data
 
 def build_report(closing):
-    """Collect everything the printout needs as plain Python data."""
+    """Collect everything the printout needs as plain Python data.
+
+    The inventory section lists exactly the items counted in THIS closing (including
+    ones archived since), and the task section lists the tasks recorded for it, so
+    changing the stock or task lists later never rewrites an old report.
+    """
     bar = db.session.get(Bar, closing.bar_id)
-    counts = {c.item_id: c.quantity for c in closing.counts}
 
     previous = (InventorySession.query
                 .filter_by(bar_id=closing.bar_id, status="completed")
@@ -47,16 +51,42 @@ def build_report(closing):
                 .first())
     previous_counts = {c.item_id: c.quantity for c in previous.counts} if previous else {}
 
+    # Group this closing's counts by category. A count whose item no longer exists
+    # (hard-deleted before archiving was introduced) goes into a "Removed items"
+    # section instead of crashing the report or silently disappearing.
+    grouped = {}
+    removed = []
+    for count in closing.counts:
+        item = count.item
+        if item is None or item.category is None:
+            removed.append(count)
+        else:
+            grouped.setdefault(item.category, []).append((item, count.quantity))
+
     sections = []
-    for category in Category.query.filter_by(bar_id=closing.bar_id).all():
+    for category, entries in sorted(grouped.items(), key=lambda pair: pair[0].id):
         rows = []
-        for item in category.items:
-            count = counts.get(item.id)
+        for item, quantity in sorted(entries, key=lambda pair: pair[0].id):
             before = previous_counts.get(item.id)
-            change = count - before if count is not None and before is not None else None
-            rows.append({"name": item.name, "previous": before,
-                         "count": count, "change": change})
+            rows.append({
+                "name": item.name,
+                "previous": before,
+                "count": quantity,
+                "change": quantity - before if before is not None else None,
+            })
         sections.append({"category": category.name, "rows": rows})
+
+    if removed:
+        rows = []
+        for count in removed:
+            before = previous_counts.get(count.item_id)
+            rows.append({
+                "name": f"Removed item (id {count.item_id})",
+                "previous": before,
+                "count": count.quantity,
+                "change": count.quantity - before if before is not None else None,
+            })
+        sections.append({"category": "Removed items", "rows": rows})
 
     cash = CashCount.query.filter_by(session_id=closing.id).first()
     cash_data = None
@@ -73,9 +103,12 @@ def build_report(closing):
             "tip_pool": cash.tip_pool_total,
         }
 
-    done_ids = {tc.task_id for tc in TaskCompletion.query.filter_by(session_id=closing.id)}
-    tasks = [{"description": task.description, "done": task.id in done_ids}
-             for task in ClosingTask.query.filter_by(bar_id=closing.bar_id).all()]
+    task_rows = (db.session.query(TaskCompletion, ClosingTask)
+                 .join(ClosingTask, TaskCompletion.task_id == ClosingTask.id)
+                 .filter(TaskCompletion.session_id == closing.id)
+                 .order_by(ClosingTask.id).all())
+    tasks = [{"description": task.description, "done": completion.done}
+             for completion, task in task_rows]
 
     return {
         "bar_name": bar.name,

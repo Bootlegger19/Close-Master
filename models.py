@@ -47,6 +47,10 @@ class Category(db.Model):
     bar_id = db.Column(db.Integer, db.ForeignKey("bar.id"), nullable=False)
 
     items = db.relationship("Item", backref="category", lazy=True)
+    @property
+    def active_items(self):
+        """Items that haven't been archived (what new closings should show)."""
+        return [item for item in self.items if item.archived_at is None]
     archived_at = db.Column(db.DateTime)   
 
 

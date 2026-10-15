@@ -33,5 +33,15 @@
       if (event.persisted) { window.location.reload(); }
     });
   </script>
+  
+  <script>
+    // Any <form data-confirm="..."> asks for confirmation before it submits.
+    document.addEventListener("submit", function (event) {
+      const message = event.target.dataset.confirm;
+      if (message && !window.confirm(message)) {
+        event.preventDefault();   // user pressed Cancel: stop the form from sending
+      }
+    });
+  </script>
 </body>
 </html>

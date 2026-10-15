@@ -6,10 +6,10 @@ from flask import (Blueprint, abort, flash, jsonify, redirect, render_template,
 from sqlalchemy import func
 
 from constants import (BUSINESS_DAY_STARTS_HOUR, CODE_MAX_LENGTH, CODE_MIN_LENGTH,
-                       DENOMINATIONS, business_date)
+                       business_date)
 from models import (db, Bar, CashCount, Category, ClosingTask, Employee,
-                    InventorySession, Item, Role, TaskCompletion)
-from printout import pdf_response
+                    InventorySession, Item, Role)
+from printout import build_report, pdf_response
 from security import (code_in_use, generate_unique_code, hash_code,
                       validate_code_format)
 
@@ -20,7 +20,13 @@ PIN_MIN_LENGTH = 4
 PIN_MAX_LENGTH = 8
 LOCKOUT_THRESHOLD = 5   # failed attempts before locking
 LOCKOUT_MINUTES = 5
+
+# --- Limits for typed text (match the column sizes in models.py) ---
+CATEGORY_NAME_MAX = 50
+ITEM_NAME_MAX = 100
 TASK_MAX_LENGTH = 200
+EMPLOYEE_NAME_MAX = 100
+HISTORY_LIMIT = 50   # most recent closings shown on the History tab
 
 # --- Dashboard tabs: (key, label, endpoint). Adding a tab = adding one line. ---
 ADMIN_TABS = [
@@ -32,7 +38,6 @@ ADMIN_TABS = [
     ("printouts", "Printouts", "admin.printouts"),
     ("security", "Security", "admin.change_pin"),
 ]
-HISTORY_LIMIT = 50   # most recent closings shown on the History tab
 
 
 @admin_bp.context_processor
@@ -70,14 +75,22 @@ def register_failed_attempt(admin):
     return locked
 
 
-def clean_task_description(raw):
-    """Return (text, error). Exactly one of them is None."""
+def clean_text(raw, max_len, label):
+    """Return (text, error) for a name or description typed by the admin."""
     text = (raw or "").strip()
     if not text:
-        return None, "Task description can't be empty."
-    if len(text) > TASK_MAX_LENGTH:
-        return None, f"Task descriptions can be up to {TASK_MAX_LENGTH} characters."
+        return None, f"{label} can't be empty."
+    if len(text) > max_len:
+        return None, f"{label} can be up to {max_len} characters."
     return text, None
+
+
+def active_categories(bar_id):
+    return Category.query.filter_by(bar_id=bar_id).filter(Category.archived_at.is_(None))
+
+
+def active_tasks(bar_id):
+    return ClosingTask.query.filter_by(bar_id=bar_id).filter(ClosingTask.archived_at.is_(None))
 
 
 def pin_required(view_func):
@@ -180,12 +193,17 @@ def dashboard():
     completed = (InventorySession.query
                  .filter_by(bar_id=bar.id, status="completed")
                  .order_by(InventorySession.completed_at.desc()))
+    active_item_count = (Item.query.join(Category)
+                         .filter(Category.bar_id == bar.id,
+                                 Category.archived_at.is_(None),
+                                 Item.archived_at.is_(None))
+                         .count())
     return render_template(
         "dashboard.html",
         active_tab="overview",
-        category_count=Category.query.filter_by(bar_id=bar.id).count(),
-        item_count=Item.query.join(Category).filter(Category.bar_id == bar.id).count(),
-        task_count=ClosingTask.query.filter_by(bar_id=bar.id).count(),
+        category_count=active_categories(bar.id).count(),
+        item_count=active_item_count,
+        task_count=active_tasks(bar.id).count(),
         closing_count=completed.count(),
         last_closing=completed.first(),
     )
@@ -195,8 +213,29 @@ def dashboard():
 @pin_required
 def stock():
     bar = Bar.query.first()
-    categories = Category.query.filter_by(bar_id=bar.id).all()
-    return render_template("stock.html", active_tab="stock", categories=categories)
+    archived_categories = (Category.query
+                           .filter(Category.bar_id == bar.id, Category.archived_at.is_not(None))
+                           .order_by(Category.archived_at.desc()).all())
+    archived_items = (Item.query.join(Category)
+                      .filter(Category.bar_id == bar.id, Item.archived_at.is_not(None))
+                      .order_by(Item.archived_at.desc()).all())
+    return render_template("stock.html", active_tab="stock",
+                           categories=active_categories(bar.id).order_by(Category.id).all(),
+                           archived_categories=archived_categories,
+                           archived_items=archived_items,
+                           category_max=CATEGORY_NAME_MAX, item_max=ITEM_NAME_MAX)
+
+
+@admin_bp.route("/tasks")
+@pin_required
+def tasks():
+    bar = Bar.query.first()
+    archived = (ClosingTask.query
+                .filter(ClosingTask.bar_id == bar.id, ClosingTask.archived_at.is_not(None))
+                .order_by(ClosingTask.archived_at.desc()).all())
+    return render_template("tasks.html", active_tab="tasks", max_len=TASK_MAX_LENGTH,
+                           tasks=active_tasks(bar.id).order_by(ClosingTask.id).all(),
+                           archived_tasks=archived)
 
 
 @admin_bp.route("/history")
@@ -220,27 +259,9 @@ def history():
 def history_detail(session_id):
     closing = InventorySession.query.filter_by(
         id=session_id, status="completed").first_or_404()
-    categories = Category.query.filter_by(bar_id=closing.bar_id).all()
-    counts = {count.item_id: count.quantity for count in closing.counts}
-
-    cash = CashCount.query.filter_by(session_id=closing.id).first()
-    labels = {cents: label for _, group in DENOMINATIONS for label, cents in group}
-    cash_lines = []
-    if cash:
-        for line in sorted(cash.lines, key=lambda l: -l.denomination_cents):
-            cash_lines.append({
-                "label": labels.get(line.denomination_cents, f"{line.denomination_cents}¢"),
-                "quantity": line.quantity,
-                "subtotal": line.denomination_cents * line.quantity / 100,
-            })
-
-    done_ids = {tc.task_id for tc in TaskCompletion.query.filter_by(session_id=closing.id)}
-    tasks_list = ClosingTask.query.filter_by(bar_id=closing.bar_id).all()
-
+    # Same data the PDF uses, so the page and the printout can never disagree.
     return render_template("history_detail.html", active_tab="history",
-                           closing=closing, categories=categories, counts=counts,
-                           cash=cash, cash_lines=cash_lines,
-                           tasks=tasks_list, done_ids=done_ids)
+                           closing=closing, report=build_report(closing))
 
 
 @admin_bp.route("/printouts")
@@ -277,14 +298,21 @@ def closing_pdf(session_id):
     return pdf_response(closing, as_attachment=request.args.get("download") == "1")
 
 
-# ------------------------------------------------------------ stock actions
+# ------------------------------------------------------- stock: categories / items
 
 @admin_bp.route("/add-category", methods=["POST"])
 @pin_required
 def add_category():
-    name = request.form["name"].strip()
-    if name:
-        db.session.add(Category(name=name, bar_id=Bar.query.first().id))
+    bar = Bar.query.first()
+    name, error = clean_text(request.form.get("name"), CATEGORY_NAME_MAX, "Category name")
+    if error:
+        flash(error)
+    elif Category.query.filter(Category.bar_id == bar.id,
+                               func.lower(Category.name) == name.lower()).first():
+        flash(f"A category called '{name}' already exists. "
+              "If it was archived, restore it from the Archived list.")
+    else:
+        db.session.add(Category(name=name, bar_id=bar.id))
         db.session.commit()
     return redirect(url_for("admin.stock"))
 
@@ -292,49 +320,85 @@ def add_category():
 @admin_bp.route("/add-item", methods=["POST"])
 @pin_required
 def add_item():
-    name = request.form["name"].strip()
-    category_id = int(request.form["category_id"])
-    if name:
-        db.session.add(Item(name=name, category_id=category_id))
+    category = (Category.query
+                .filter(Category.id == request.form.get("category_id", type=int),
+                        Category.archived_at.is_(None)).first())
+    if category is None:
+        flash("That category doesn't exist, or it has been archived.")
+        return redirect(url_for("admin.stock"))
+
+    name, error = clean_text(request.form.get("name"), ITEM_NAME_MAX, "Item name")
+    if error:
+        flash(error)
+        return redirect(url_for("admin.stock"))
+
+    same_name = Item.query.filter(Item.category_id == category.id,
+                                  func.lower(Item.name) == name.lower())
+    if same_name.filter(Item.archived_at.is_(None)).first():
+        flash(f"'{name}' is already in {category.name}.")
+    elif same_name.filter(Item.archived_at.is_not(None)).first():
+        flash(f"'{name}' was archived earlier. Restore it from the Archived list "
+              "so its history carries on.")
+    else:
+        db.session.add(Item(name=name, category_id=category.id))
         db.session.commit()
     return redirect(url_for("admin.stock"))
 
 
-@admin_bp.route("/delete-item/<int:item_id>", methods=["POST"])
+@admin_bp.route("/archive-item/<int:item_id>", methods=["POST"])
 @pin_required
-def delete_item(item_id):
+def archive_item(item_id):
     item = Item.query.get_or_404(item_id)
-    db.session.delete(item)
+    item.archived_at = datetime.now()
     db.session.commit()
+    flash(f"'{item.name}' archived. Past closings still show it.")
     return redirect(url_for("admin.stock"))
 
 
-@admin_bp.route("/delete-category/<int:category_id>", methods=["POST"])
+@admin_bp.route("/restore-item/<int:item_id>", methods=["POST"])
 @pin_required
-def delete_category(category_id):
+def restore_item(item_id):
+    item = Item.query.get_or_404(item_id)
+    if item.category.archived_at is not None:
+        flash(f"Restore the category '{item.category.name}' first.")
+    else:
+        item.archived_at = None
+        db.session.commit()
+        flash(f"'{item.name}' restored.")
+    return redirect(url_for("admin.stock"))
+
+
+@admin_bp.route("/archive-category/<int:category_id>", methods=["POST"])
+@pin_required
+def archive_category(category_id):
     category = Category.query.get_or_404(category_id)
-    if category.items:
-        flash(f"Can't delete '{category.name}' — it still has items in it.")
-        return redirect(url_for("admin.stock"))
-    db.session.delete(category)
-    db.session.commit()
+    if category.active_items:
+        flash(f"Can't archive '{category.name}': it still has active items. "
+              "Archive them first.")
+    else:
+        category.archived_at = datetime.now()
+        db.session.commit()
+        flash(f"'{category.name}' archived.")
     return redirect(url_for("admin.stock"))
 
 
-# ------------------------------------------------------------ task actions
-
-@admin_bp.route("/tasks")
+@admin_bp.route("/restore-category/<int:category_id>", methods=["POST"])
 @pin_required
-def tasks():
-    bar = Bar.query.first()
-    return render_template("tasks.html", active_tab="tasks", max_len=TASK_MAX_LENGTH,
-                           tasks=ClosingTask.query.filter_by(bar_id=bar.id).all())
+def restore_category(category_id):
+    category = Category.query.get_or_404(category_id)
+    category.archived_at = None
+    db.session.commit()
+    flash(f"'{category.name}' restored.")
+    return redirect(url_for("admin.stock"))
 
+
+# ---------------------------------------------------------------- closing tasks
 
 @admin_bp.route("/add-task", methods=["POST"])
 @pin_required
 def add_task():
-    text, error = clean_task_description(request.form.get("description"))
+    text, error = clean_text(request.form.get("description"), TASK_MAX_LENGTH,
+                             "Task description")
     if error:
         flash(error)
     else:
@@ -347,7 +411,8 @@ def add_task():
 @pin_required
 def edit_task(task_id):
     task = ClosingTask.query.get_or_404(task_id)
-    text, error = clean_task_description(request.form.get("description"))
+    text, error = clean_text(request.form.get("description"), TASK_MAX_LENGTH,
+                             "Task description")
     if error:
         flash(error)
     else:
@@ -357,19 +422,27 @@ def edit_task(task_id):
     return redirect(url_for("admin.tasks"))
 
 
-@admin_bp.route("/delete-task/<int:task_id>", methods=["POST"])
+@admin_bp.route("/archive-task/<int:task_id>", methods=["POST"])
 @pin_required
-def delete_task(task_id):
+def archive_task(task_id):
     task = ClosingTask.query.get_or_404(task_id)
-    TaskCompletion.query.filter_by(task_id=task.id).delete()
-    db.session.delete(task)
+    task.archived_at = datetime.now()
     db.session.commit()
+    flash("Task archived. Past closings still show it.")
     return redirect(url_for("admin.tasks"))
 
-# ------------------------------------------------------------- employees
 
-EMPLOYEE_NAME_MAX = 100
+@admin_bp.route("/restore-task/<int:task_id>", methods=["POST"])
+@pin_required
+def restore_task(task_id):
+    task = ClosingTask.query.get_or_404(task_id)
+    task.archived_at = None
+    db.session.commit()
+    flash("Task restored.")
+    return redirect(url_for("admin.tasks"))
 
+
+# ------------------------------------------------------------------ employees
 
 def _employee_query():
     """All non-admin employees, active or archived."""
@@ -390,11 +463,9 @@ def get_employee_or_404(employee_id):
 
 def clean_employee_name(raw, ignore_id=None):
     """Return (name, error). Exactly one of them is None."""
-    name = (raw or "").strip()
-    if not name:
-        return None, "Name can't be empty."
-    if len(name) > EMPLOYEE_NAME_MAX:
-        return None, f"Names can be up to {EMPLOYEE_NAME_MAX} characters."
+    name, error = clean_text(raw, EMPLOYEE_NAME_MAX, "Name")
+    if error:
+        return None, error
     clash = active_employees().filter(func.lower(Employee.name) == name.lower())
     if ignore_id is not None:
         clash = clash.filter(Employee.id != ignore_id)

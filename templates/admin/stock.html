@@ -1,9 +1,15 @@
 {% extends "admin_base.html" %}
 {% block title %}Stock{% endblock %}
 {% block admin_content %}
+  <p class="text-muted">
+    Archiving takes something out of future closings but keeps it on past reports.
+    Nothing here is permanently deleted.
+  </p>
+
   <form action="{{ url_for('admin.add_category') }}" method="post" class="row g-2 mb-4">
     <div class="col-md-8">
-      <input type="text" name="name" class="form-control" placeholder="New category name" required>
+      <input type="text" name="name" maxlength="{{ category_max }}" class="form-control"
+             placeholder="New category name" required>
     </div>
     <div class="col-md-4">
       <button type="submit" class="btn btn-primary w-100">Add category</button>
@@ -14,18 +20,18 @@
     <div class="card mb-3">
       <div class="card-header d-flex justify-content-between align-items-center">
         <span class="fw-bold">{{ category.name }}</span>
-        <form action="{{ url_for('admin.delete_category', category_id=category.id) }}" method="post"
-              onsubmit="return confirm('Delete category {{ category.name }}?');">
-          <button type="submit" class="btn btn-outline-danger btn-sm">Delete category</button>
+        <form action="{{ url_for('admin.archive_category', category_id=category.id) }}" method="post"
+              data-confirm="Archive category {{ category.name }}?">
+          <button type="submit" class="btn btn-outline-secondary btn-sm">Archive category</button>
         </form>
       </div>
       <ul class="list-group list-group-flush">
-        {% for item in category.items %}
+        {% for item in category.active_items %}
           <li class="list-group-item d-flex justify-content-between align-items-center">
             {{ item.name }}
-            <form action="{{ url_for('admin.delete_item', item_id=item.id) }}" method="post"
-                  onsubmit="return confirm('Delete {{ item.name }}?');">
-              <button type="submit" class="btn btn-outline-danger btn-sm">Delete</button>
+            <form action="{{ url_for('admin.archive_item', item_id=item.id) }}" method="post"
+                  data-confirm="Archive {{ item.name }}? It leaves future closings but stays on past reports.">
+              <button type="submit" class="btn btn-outline-secondary btn-sm">Archive</button>
             </form>
           </li>
         {% else %}
@@ -35,7 +41,8 @@
       <div class="card-body">
         <form action="{{ url_for('admin.add_item') }}" method="post" class="d-flex gap-2">
           <input type="hidden" name="category_id" value="{{ category.id }}">
-          <input type="text" name="name" class="form-control" placeholder="New item" required>
+          <input type="text" name="name" maxlength="{{ item_max }}" class="form-control"
+                 placeholder="New item" required>
           <button type="submit" class="btn btn-sm btn-outline-primary">Add</button>
         </form>
       </div>
@@ -43,4 +50,39 @@
   {% else %}
     <p class="text-muted">No categories yet. Add one above.</p>
   {% endfor %}
+
+  {% if archived_categories or archived_items %}
+    <h2 class="h5 mt-5">Archived</h2>
+
+    {% if archived_categories %}
+      <h3 class="h6 text-muted">Categories</h3>
+      <ul class="list-group mb-3">
+        {% for category in archived_categories %}
+          <li class="list-group-item d-flex justify-content-between align-items-center">
+            {{ category.name }}
+            <form action="{{ url_for('admin.restore_category', category_id=category.id) }}" method="post">
+              <button type="submit" class="btn btn-outline-success btn-sm">Restore</button>
+            </form>
+          </li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+
+    {% if archived_items %}
+      <h3 class="h6 text-muted">Items</h3>
+      <ul class="list-group mb-3">
+        {% for item in archived_items %}
+          <li class="list-group-item d-flex justify-content-between align-items-center">
+            <span>
+              {{ item.name }}
+              <span class="text-muted small">in {{ item.category.name }}{% if item.category.archived_at %} (archived){% endif %}</span>
+            </span>
+            <form action="{{ url_for('admin.restore_item', item_id=item.id) }}" method="post">
+              <button type="submit" class="btn btn-outline-success btn-sm">Restore</button>
+            </form>
+          </li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+  {% endif %}
 {% endblock %}

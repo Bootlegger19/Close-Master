@@ -19,7 +19,7 @@
     <div class="card mb-3">
       <div class="card-header fw-bold">{{ category.name }}</div>
       <ul class="list-group list-group-flush">
-        {% for item in category.items %}
+        {% for item in category.active_items %}
           <li class="list-group-item d-flex justify-content-between align-items-center">
             <div>
               {{ item.name }}
