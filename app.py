@@ -1,9 +1,10 @@
+import os
 from flask import Flask, render_template
 from models import db, Bar, Category, Role, Employee, ClosingTask
 
 app = Flask(__name__)
-app.config["SECRET_KEY"] = "dev-secret-change-later"
-app.config["CODE_PEPPER"] = "dev-pepper-change-later"
+app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-secret-change-later")
+app.config["CODE_PEPPER"] = os.environ.get("CODE_PEPPER", "dev-pepper-change-later")
 app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///inventory.db"
 db.init_app(app)
 
